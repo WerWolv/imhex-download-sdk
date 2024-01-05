@@ -1,0 +1,89 @@
+name: 'ImHex Plugin'
+description: 'Action that sets up necessary things to build ImHex Plugins'
+author: WerWolv
+branding:
+  icon: book
+  color: blue
+inputs:
+  imhex_version:
+    description: 'ImHex Version to target'
+    required: true
+outputs:
+  sdk_path:
+    description: "Path to the ImHex SDK"
+    value: ${{ steps.sdk_install.outputs.sdk_path }}
+runs:
+  using: "composite"
+  steps:
+    # Get version of this action that's being used
+    - name: Get Action Version
+      env:
+        GH_ACTION_REF: ${{ github.action_ref || github.ref_name }}
+      shell: bash
+      id: version
+      run: |
+        set -x
+        echo "imhex_version=${GH_ACTION_REF:1}" >> $GITHUB_OUTPUT
+
+    # Handle building on a Windows runner
+    - name: Install msys2
+      if: runner.os == 'Windows'
+      uses: msys2/setup-msys2@v2
+      with:
+        msystem: mingw64
+
+    - name: Install dependencies
+      if: runner.os == 'Windows'
+      shell: msys2 {0}
+      run: |
+        set -x
+        wget https://raw.githubusercontent.com/WerWolv/ImHex/v${{ steps.version.outputs.imhex_version }}/dist/get_deps_msys2.sh
+        chmod +x get_deps_msys2.sh
+        ./get_deps_msys2.sh
+        pacman -S --needed --noconfirm unzip
+
+    - name: Install ImHex SDK
+      if: runner.os == 'Windows'
+      id: sdk_install_win
+      shell: msys2 {0}
+      run: |
+        set -x
+        wget https://github.com/WerWolv/ImHex/releases/download/v${{ steps.version.outputs.imhex_version }}/imhex-${{ steps.version.outputs.imhex_version }}-Windows-Portable-x86_64.zip
+        mkdir -p imhex
+        unzip imhex-${{ steps.version.outputs.imhex_version }}-Windows-Portable-x86_64.zip -d imhex
+        echo "sdk_path=$(pwd)/imhex/sdk" >> $GITHUB_OUTPUT
+
+    # Handle building on a macOS runner
+    - name: Install dependencies
+      if: runner.os == 'macOS'
+      shell: bash
+      run: |
+        set -x
+        wget https://raw.githubusercontent.com/WerWolv/ImHex/v${{ steps.version.outputs.imhex_version }}/dist/Brewfile
+        brew reinstall python || brew link --overwrite python
+        brew bundle --no-lock --file Brewfile
+        rm -rf /usr/local/Cellar/capstone
+
+    - name: Install ImHex SDK
+      if: runner.os == 'macOS'
+      id: sdk_install_macos
+      shell: bash
+      run: |
+        set -x
+        wget https://github.com/WerWolv/ImHex/releases/download/v${{ steps.version.outputs.imhex_version }}/imhex-${{ steps.version.outputs.imhex_version }}-macOS-x86_64.dmg
+        brew install sevenzip
+        7zz x -aoa -snld imhex-${{ steps.version.outputs.imhex_version }}-macOS-x86_64.dmg || true
+        echo "sdk_path=$(pwd)/imhex-${{ steps.version.outputs.imhex_version }}-macOS-x86_64/imhex.app/Contents/Resources/sdk" >> $GITHUB_OUTPUT
+
+    - name: Set SDK Variable
+      shell: bash
+      id: sdk_install
+      run: |
+        set -x
+        WIN_PATH=${{ steps.sdk_install_win.outputs.sdk_path }}
+        MAC_PATH=${{ steps.sdk_install_macos.outputs.sdk_path }}
+        if [ -z "$WIN_PATH" ]; then
+            echo "sdk_path=$MAC_PATH" >> $GITHUB_OUTPUT
+        else
+            echo "sdk_path=$WIN_PATH" >> $GITHUB_OUTPUT
+        fi
